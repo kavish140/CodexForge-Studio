@@ -540,13 +540,13 @@ console.log('Canvas animation running');`,
   },
   {
     id: 'sql',
-    name: 'SQL (SQLite)',
+    name: 'SQL (SQLite / MySQL)',
     shortName: 'SQL',
     monacoLanguage: 'sql',
     extension: 'sql',
     filename: 'query.sql',
     engine: 'browser',
-    defaultVersion: 'SQLite WASM',
+    defaultVersion: 'SQLite WASM + MySQL user management',
     accentHex: '#10B981',
     category: 'data',
     supportsStdin: false,
@@ -585,6 +585,27 @@ SELECT
 FROM engineers
 GROUP BY team
 ORDER BY total_commits DESC;
+`,
+      },
+      {
+        id: 'sql-mysql-users',
+        name: 'MySQL User Management',
+        description: 'Demonstrates MySQL account, grant and role syntax in the browser',
+        code: `CREATE USER kavya IDENTIFIED BY '123';
+CREATE USER 'admin'@'localhost' IDENTIFIED BY 'secure-password';
+
+ALTER USER kavya IDENTIFIED BY 'new-password';
+
+GRANT SELECT, INSERT ON app_db.* TO kavya;
+SHOW GRANTS FOR kavya;
+
+CREATE ROLE 'developer';
+GRANT UPDATE ON app_db.* TO 'developer';
+
+SHOW USERS;
+
+REVOKE INSERT ON app_db.* FROM kavya;
+DROP USER kavya;
 `,
       },
       {
