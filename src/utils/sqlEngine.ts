@@ -101,6 +101,118 @@ function ensureMySqlTables(db: Database): void {
   `);
 }
 
+function padTwo(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function formatDate(date: Date, includeTime: boolean): string {
+  const datePart = `${date.getFullYear()}-${padTwo(date.getMonth() + 1)}-${padTwo(date.getDate())}`;
+  if (!includeTime) return datePart;
+  return `${datePart} ${padTwo(date.getHours())}:${padTwo(date.getMinutes())}:${padTwo(
+    date.getSeconds(),
+  )}`;
+}
+
+function installMySqlCompatibility(db: Database): void {
+  db.create_function('curdate', () => formatDate(new Date(), false));
+  db.create_function('current_date', () => formatDate(new Date(), false));
+  db.create_function('now', () => formatDate(new Date(), true));
+  db.create_function('current_timestamp', () => formatDate(new Date(), true));
+  db.create_function('localtime', () => formatDate(new Date(), true));
+  db.create_function('sysdate', () => formatDate(new Date(), true));
+  db.create_function('utc_date', () => {
+    const date = new Date();
+    return `${date.getUTCFullYear()}-${padTwo(date.getUTCMonth() + 1)}-${padTwo(date.getUTCDate())}`;
+  });
+  db.create_function('utc_timestamp', () => {
+    const date = new Date();
+    return `${date.getUTCFullYear()}-${padTwo(date.getUTCMonth() + 1)}-${padTwo(
+      date.getUTCDate(),
+    )} ${padTwo(date.getUTCHours())}:${padTwo(date.getUTCMinutes())}:${padTwo(
+      date.getUTCSeconds(),
+    )}`;
+  });
+  db.create_function('user', () => 'codexforge@localhost');
+  db.create_function('current_user', () => 'codexforge@localhost');
+  db.create_function('session_user', () => 'codexforge@localhost');
+  db.create_function('system_user', () => 'codexforge@localhost');
+  db.create_function('database', () => 'codexforge');
+  db.create_function('schema', () => 'codexforge');
+  db.create_function('version', () => '8.0.36-CodexForge');
+  db.create_function('concat', (...values: unknown[]) =>
+    values.every((value) => value !== null) ? values.join('') : null,
+  );
+  db.create_function('concat_ws', (separator: unknown, ...values: unknown[]) =>
+    values.filter((value) => value !== null).join(String(separator ?? '')),
+  );
+  db.create_function('if', (condition: unknown, whenTrue: unknown, whenFalse: unknown) =>
+    condition ? whenTrue : whenFalse,
+  );
+  db.create_function('ifnull', (value: unknown, fallback: unknown) =>
+    value === null || value === undefined ? fallback : value,
+  );
+  db.create_function('nullif', (first: unknown, second: unknown) =>
+    first === second ? null : first,
+  );
+  db.create_function('char_length', (value: unknown) => String(value ?? '').length);
+  db.create_function('character_length', (value: unknown) => String(value ?? '').length);
+  db.create_function('left', (value: unknown, count: unknown) =>
+    String(value ?? '').slice(0, Math.max(0, Number(count) || 0)),
+  );
+  db.create_function('right', (value: unknown, count: unknown) => {
+    const text = String(value ?? '');
+    const length = Math.max(0, Number(count) || 0);
+    return length === 0 ? '' : text.slice(-length);
+  });
+  db.create_function('repeat', (value: unknown, count: unknown) =>
+    String(value ?? '').repeat(Math.max(0, Number(count) || 0)),
+  );
+  db.create_function('reverse', (value: unknown) =>
+    Array.from(String(value ?? '')).reverse().join(''),
+  );
+  db.create_function('locate', (needle: unknown, haystack: unknown, start?: unknown) => {
+    const text = String(haystack ?? '');
+    const from = Math.max(1, Number(start) || 1);
+    const position = text.toLowerCase().indexOf(String(needle ?? '').toLowerCase(), from - 1);
+    return position < 0 ? 0 : position + 1;
+  });
+  db.create_function('instr', (haystack: unknown, needle: unknown) => {
+    const position = String(haystack ?? '').toLowerCase().indexOf(String(needle ?? '').toLowerCase());
+    return position < 0 ? 0 : position + 1;
+  });
+  db.create_function('rand', () => Math.random());
+  db.create_function('uuid', () => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+      const random = Math.floor(Math.random() * 16);
+      const value = char === 'x' ? random : (random & 0x3) | 0x8;
+      return value.toString(16);
+    });
+  });
+  db.create_function('datediff', (first: unknown, second: unknown) => {
+    const firstDate = new Date(String(first));
+    const secondDate = new Date(String(second));
+    if (Number.isNaN(firstDate.getTime()) || Number.isNaN(secondDate.getTime())) return null;
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    return Math.round((firstDate.getTime() - secondDate.getTime()) / millisecondsPerDay);
+  });
+  db.create_function('date_format', (value: unknown, format: unknown) => {
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime()) && value !== null) return null;
+    const pattern = String(format ?? '');
+    return pattern
+      .replace(/%Y/g, String(date.getFullYear()))
+      .replace(/%y/g, String(date.getFullYear()).slice(-2))
+      .replace(/%m/g, padTwo(date.getMonth() + 1))
+      .replace(/%d/g, padTwo(date.getDate()))
+      .replace(/%H/g, padTwo(date.getHours()))
+      .replace(/%i/g, padTwo(date.getMinutes()))
+      .replace(/%s/g, padTwo(date.getSeconds()));
+  });
+}
+
 function splitCommaSeparated(value: string): string[] {
   const parts: string[] = [];
   let current = '';
@@ -126,6 +238,66 @@ function splitCommaSeparated(value: string): string[] {
 }
 
 function executeMySqlStatement(db: Database, statement: string): QueryExecResult[] {
+  const createDatabase = statement.match(
+    /^CREATE\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s;]+)/i,
+  );
+  if (createDatabase) {
+    ensureMySqlTables(db);
+    db.run(`CREATE TABLE IF NOT EXISTS _codexforge_mysql_databases (name TEXT PRIMARY KEY);`);
+    db.run(`INSERT OR IGNORE INTO _codexforge_mysql_databases (name) VALUES (?);`, [
+      stripIdentifier(createDatabase[1]),
+    ]);
+    return [];
+  }
+
+  const dropDatabase = statement.match(
+    /^DROP\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+EXISTS\s+)?([^\s;]+)/i,
+  );
+  if (dropDatabase) {
+    ensureMySqlTables(db);
+    db.run(`CREATE TABLE IF NOT EXISTS _codexforge_mysql_databases (name TEXT PRIMARY KEY);`);
+    db.run(`DELETE FROM _codexforge_mysql_databases WHERE name = ?;`, [
+      stripIdentifier(dropDatabase[1]),
+    ]);
+    return [];
+  }
+
+  if (/^USE\s+/i.test(statement)) {
+    ensureMySqlTables(db);
+    db.run(`CREATE TABLE IF NOT EXISTS _codexforge_mysql_databases (name TEXT PRIMARY KEY);`);
+    const match = statement.match(/^USE\s+([^\s;]+)/i);
+    if (match) {
+      db.run(`INSERT OR IGNORE INTO _codexforge_mysql_databases (name) VALUES (?);`, [
+        stripIdentifier(match[1]),
+      ]);
+    }
+    return [];
+  }
+
+  if (/^SHOW\s+(?:DATABASES|SCHEMAS)\s*$/i.test(statement)) {
+    ensureMySqlTables(db);
+    db.run(`CREATE TABLE IF NOT EXISTS _codexforge_mysql_databases (name TEXT PRIMARY KEY);`);
+    db.run(`INSERT OR IGNORE INTO _codexforge_mysql_databases (name) VALUES ('codexforge');`);
+    return db.exec(`SELECT name AS Database FROM _codexforge_mysql_databases ORDER BY name;`);
+  }
+
+  if (/^SHOW\s+TABLES\s*$/i.test(statement)) {
+    return db.exec(
+      `SELECT name AS Tables_in_codexforge
+       FROM sqlite_master
+       WHERE type = 'table'
+         AND name NOT LIKE 'sqlite_%'
+         AND name NOT LIKE '_codexforge_mysql_%'
+       ORDER BY name;`,
+    );
+  }
+
+  const describe = statement.match(/^(?:DESCRIBE|DESC)\s+([^\s;]+)/i);
+  if (describe) {
+    const table = stripIdentifier(describe[1]);
+    return db.exec(`PRAGMA table_info('${table.replace(/'/g, "''")}');`);
+  }
+
   const createUser = statement.match(
     /^CREATE\s+USER\s+(?:IF\s+NOT\s+EXISTS\s+)?(.+?)(?:\s+IDENTIFIED\b|$)/i,
   );
@@ -308,13 +480,14 @@ export async function executeSqlBrowser(runId: string, code: string): Promise<Ex
     const db = new SQL.Database();
 
     try {
+      installMySqlCompatibility(db);
       const statements = splitSqlStatements(code);
       const results: QueryExecResult[] = [];
       let usedMySqlUserManagement = false;
 
       for (const statement of statements) {
         if (
-          /^CREATE\s+(?:USER|ROLE)\b|^ALTER\s+USER\b|^DROP\s+(?:USER|ROLE)\b|^SET\s+PASSWORD\b|^GRANT\b|^REVOKE\b|^SHOW\s+(?:USERS|GRANTS)\b|^FLUSH\s+PRIVILEGES\b/i.test(
+          /^CREATE\s+(?:USER|ROLE|DATABASE|SCHEMA)\b|^ALTER\s+USER\b|^DROP\s+(?:USER|ROLE|DATABASE|SCHEMA)\b|^SET\s+PASSWORD\b|^GRANT\b|^REVOKE\b|^SHOW\s+(?:USERS|GRANTS|DATABASES|SCHEMAS|TABLES)\b|^USE\b|^DESCRIBE\b|^DESC\b|^FLUSH\s+PRIVILEGES\b/i.test(
             statement,
           )
         ) {

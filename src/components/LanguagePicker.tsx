@@ -365,11 +365,12 @@ export function LanguagePicker({
                             <div className="flex items-center gap-1 font-medium leading-tight">
                               {lang.name}
                               {isAutoMatch && (
-                                <Sparkles
-                                  className="h-2.5 w-2.5"
-                                  style={{ color: 'var(--accent)' }}
-                                  title="Auto-detected match"
-                                />
+                                <span title="Auto-detected match" aria-label="Auto-detected match">
+                                  <Sparkles
+                                    className="h-2.5 w-2.5"
+                                    style={{ color: 'var(--accent)' }}
+                                  />
+                                </span>
                               )}
                             </div>
                             <div

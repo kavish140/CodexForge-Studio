@@ -598,6 +598,7 @@ ALTER USER kavya IDENTIFIED BY 'new-password';
 
 GRANT SELECT, INSERT ON app_db.* TO kavya;
 SHOW GRANTS FOR kavya;
+SELECT CURDATE() AS today, NOW() AS current_time, USER() AS current_user;
 
 CREATE ROLE 'developer';
 GRANT UPDATE ON app_db.* TO 'developer';
