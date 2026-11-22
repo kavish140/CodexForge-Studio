@@ -20,6 +20,7 @@ import type {
 import { ConsoleView } from './ConsoleView';
 import { SqlTablesView } from './SqlTablesView';
 import { WebPreviewView } from './WebPreviewView';
+import { TerminalView } from './TerminalView';
 
 interface IOPaneProps {
   language: LanguageDefinition;
@@ -37,6 +38,8 @@ interface IOPaneProps {
   onRefreshPreview: () => void;
   onJumpToLine: (line: number, column?: number) => void;
   onNotify: (msg: string) => void;
+  workspaceId?: string;
+  workspaceName?: string;
 }
 
 export function IOPane({
@@ -55,6 +58,8 @@ export function IOPane({
   onRefreshPreview,
   onJumpToLine,
   onNotify,
+  workspaceId,
+  workspaceName,
 }: IOPaneProps) {
   const [stdinCollapsed, setStdinCollapsed] = useState(false);
   const [copiedOut, setCopiedOut] = useState(false);
@@ -138,6 +143,9 @@ export function IOPane({
             badge: result?.sqlTables?.length,
           },
         ]
+      : []),
+    ...(workspaceId
+      ? [{ id: 'terminal' as const, label: 'Terminal', icon: Terminal }]
       : []),
     {
       id: 'console' as const,
@@ -386,6 +394,12 @@ export function IOPane({
             />
           ) : activeTab === 'tables' && isSql ? (
             <SqlTablesView tables={result?.sqlTables ?? []} />
+          ) : activeTab === 'terminal' && workspaceId ? (
+            <TerminalView
+              workspaceId={workspaceId}
+              workspaceName={workspaceName}
+              onNotify={onNotify}
+            />
           ) : (
             <ConsoleView
               language={language}

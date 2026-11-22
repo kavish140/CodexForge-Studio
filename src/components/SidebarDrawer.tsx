@@ -9,6 +9,9 @@ import {
   Search,
   Sparkles,
   Trash2,
+  FolderKanban,
+  FolderPlus,
+  Play,
   X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -19,6 +22,7 @@ import type {
   RunHistoryEntry,
   SavedSnippet,
   SidebarTabId,
+  WorkspaceProject,
 } from '../types/playground';
 
 interface SidebarDrawerProps {
@@ -36,6 +40,16 @@ interface SidebarDrawerProps {
   onDeleteSnippet: (id: string) => void;
   onRestoreHistory: (entry: RunHistoryEntry) => void;
   onClearHistory: () => void;
+  workspaces: WorkspaceProject[];
+  activeWorkspaceId: string;
+  activeFilePath: string;
+  onCreateWorkspace: (name: string) => void;
+  onSelectWorkspace: (workspace: WorkspaceProject) => void;
+  onSelectProjectFile: (path: string) => void;
+  onCreateProjectFile: (path: string) => void;
+  onDeleteProjectFile: (path: string) => void;
+  onSetEntryFile: (path: string) => void;
+  onDeleteWorkspace: (id: string) => void;
 }
 
 function formatTime(ts: number): string {
@@ -58,11 +72,23 @@ export function SidebarDrawer({
   onDeleteSnippet,
   onRestoreHistory,
   onClearHistory,
+  workspaces,
+  activeWorkspaceId,
+  activeFilePath,
+  onCreateWorkspace,
+  onSelectWorkspace,
+  onSelectProjectFile,
+  onCreateProjectFile,
+  onDeleteProjectFile,
+  onSetEntryFile,
+  onDeleteWorkspace,
 }: SidebarDrawerProps) {
   const [newName, setNewName] = useState('');
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [projectFilePath, setProjectFilePath] = useState('');
 
   const filteredSnippets = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -101,6 +127,7 @@ export function SidebarDrawer({
             { id: 'templates' as const, label: 'Templates', icon: Sparkles },
             { id: 'saved' as const, label: 'Saved', icon: Bookmark, count: savedSnippets.length },
             { id: 'history' as const, label: 'History', icon: History, count: history.length },
+            { id: 'workspaces' as const, label: 'Projects', icon: FolderKanban, count: workspaces.length },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -457,6 +484,152 @@ export function SidebarDrawer({
                   );
                 })}
               </div>
+            )}
+          </div>
+        )}
+        {activeTab === 'workspaces' && (
+          <div className="space-y-2.5">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                onCreateWorkspace(workspaceName);
+                setWorkspaceName('');
+              }}
+              className="flex gap-1.5"
+            >
+              <input
+                value={workspaceName}
+                onChange={(event) => setWorkspaceName(event.target.value)}
+                placeholder={`New ${language.shortName} workspace...`}
+                className="min-w-0 flex-1 rounded-md border px-2.5 py-1.5 text-xs outline-none focus:border-[var(--accent)]"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--text-primary)',
+                }}
+              />
+              <button
+                type="submit"
+                className="flex h-7.5 items-center gap-1 rounded-md px-2.5 text-xs font-semibold"
+                style={{ backgroundColor: 'var(--accent)', color: 'var(--accent-fg)' }}
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                New
+              </button>
+            </form>
+
+            {workspaces.length === 0 ? (
+              <div
+                className="rounded-lg border border-dashed px-4 py-8 text-center text-xs"
+                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+              >
+                Create a workspace to manage multiple files and open a dedicated terminal.
+              </div>
+            ) : (
+              workspaces.map((workspace) => {
+                const active = workspace.id === activeWorkspaceId;
+                const wsLanguage = getLanguageById(workspace.language);
+                return (
+                  <div
+                    key={workspace.id}
+                    className="rounded-lg border"
+                    style={{
+                      backgroundColor: active ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+                      borderColor: active ? 'var(--accent)' : 'var(--border-subtle)',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectWorkspace(workspace)}
+                      className="flex w-full items-center justify-between px-2.5 py-2 text-left"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <FolderKanban className="h-3.5 w-3.5 shrink-0" style={{ color: wsLanguage.accentHex }} />
+                        <span className="truncate text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                          {workspace.name}
+                        </span>
+                      </span>
+                      <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                        {workspace.files.length} files
+                      </span>
+                    </button>
+
+                    {active && (
+                      <div className="border-t px-2 py-2" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <form
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            onCreateProjectFile(projectFilePath);
+                            setProjectFilePath('');
+                          }}
+                          className="mb-1.5 flex gap-1"
+                        >
+                          <input
+                            value={projectFilePath}
+                            onChange={(event) => setProjectFilePath(event.target.value)}
+                            placeholder="src/helper.py"
+                            className="min-w-0 flex-1 rounded border px-2 py-1 font-mono-code text-[10px] outline-none"
+                            style={{
+                              backgroundColor: 'var(--bg-app)',
+                              borderColor: 'var(--border-subtle)',
+                              color: 'var(--text-primary)',
+                            }}
+                          />
+                          <button type="submit" className="rounded px-1.5" title="Add file" style={{ color: 'var(--accent)' }}>
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                        </form>
+
+                        <div className="space-y-0.5">
+                          {workspace.files.map((file) => (
+                            <div
+                              key={file.path}
+                              className="group flex items-center rounded px-1.5 py-1"
+                              style={{
+                                backgroundColor: file.path === activeFilePath ? 'var(--bg-active)' : 'transparent',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => onSelectProjectFile(file.path)}
+                                className="min-w-0 flex-1 truncate text-left font-mono-code text-[10px]"
+                                style={{ color: file.path === activeFilePath ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+                              >
+                                {workspace.entryFile === file.path ? '▶ ' : ''}{file.path}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onSetEntryFile(file.path)}
+                                className="rounded p-0.5 opacity-0 group-hover:opacity-100"
+                                title="Set entry file"
+                                style={{ color: 'var(--accent)' }}
+                              >
+                                <Play className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteProjectFile(file.path)}
+                                className="rounded p-0.5 opacity-0 group-hover:opacity-100"
+                                title="Delete file"
+                                style={{ color: 'var(--text-muted)' }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteWorkspace(workspace.id)}
+                          className="mt-2 text-[10px] text-rose-400 hover:underline"
+                        >
+                          Delete workspace
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         )}

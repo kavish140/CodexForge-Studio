@@ -166,6 +166,36 @@ async function cleanupDir(dir: string): Promise<void> {
   }
 }
 
+function safeProjectPath(workDir: string, filePath: string): string | null {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!normalized || normalized.includes('\0') || normalized.split('/').includes('..')) return null;
+  const resolved = path.resolve(workDir, normalized);
+  if (resolved !== workDir && !resolved.startsWith(`${workDir}${path.sep}`)) return null;
+  return resolved;
+}
+
+async function writeProjectFiles(
+  workDir: string,
+  req: RunRequest,
+): Promise<{ sourceFile: string | null; error?: string }> {
+  if (!req.files || req.files.length === 0) return { sourceFile: null };
+
+  for (const file of req.files) {
+    const target = safeProjectPath(workDir, file.path);
+    if (!target) return { sourceFile: null, error: `Unsafe project path: ${file.path}` };
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, file.content, 'utf8');
+  }
+
+  const entryFile = req.entryFile
+    ? safeProjectPath(workDir, req.entryFile)
+    : null;
+  if (req.entryFile && !entryFile) {
+    return { sourceFile: null, error: `Unsafe entry file: ${req.entryFile}` };
+  }
+  return { sourceFile: entryFile ? path.relative(workDir, entryFile).replace(/\\/g, '/') : null };
+}
+
 export async function executeLocal(
   req: RunRequest,
   runtimeVersion?: string | null,
@@ -176,16 +206,34 @@ export async function executeLocal(
 
   try {
     const { language, code, stdin = '' } = req;
+    const project = await writeProjectFiles(workDir, req);
+    if (project.error) {
+      return {
+        runId: req.runId,
+        status: 'error',
+        engine: 'local',
+        stdout: '',
+        stderr: project.error,
+        compilerOutput: '',
+        exitCode: null,
+        compileTimeMs: null,
+        runTimeMs: 0,
+        diagnostics: [],
+        runtimeVersion: runtimeVersion ?? undefined,
+      };
+    }
 
     if (language === 'c' || language === 'cpp') {
       const isCpp = language === 'cpp';
-      const sourceFile = isCpp ? 'main.cpp' : 'main.c';
+      const sourceFile = project.sourceFile ?? (isCpp ? 'main.cpp' : 'main.c');
       const exeFile = process.platform === 'win32' ? 'main.exe' : './main';
       const compiler = isCpp ? 'g++' : 'gcc';
       const sourcePath = path.join(workDir, sourceFile);
       const exePath = path.join(workDir, exeFile);
 
-      await fs.writeFile(sourcePath, code, 'utf8');
+      if (!req.files || req.files.length === 0) {
+        await fs.writeFile(sourcePath, code, 'utf8');
+      }
 
       const sanitizedFlags = sanitizeCompilerFlags(language, req.flags);
       const defaultStd = isCpp ? '-std=c++20' : '-std=c17';
@@ -307,10 +355,13 @@ export async function executeLocal(
     }
 
     if (language === 'python') {
-      const sourcePath = path.join(workDir, 'main.py');
-      await fs.writeFile(sourcePath, code, 'utf8');
+      const sourceFile = project.sourceFile ?? 'main.py';
+      const sourcePath = path.join(workDir, sourceFile);
+      if (!req.files || req.files.length === 0) {
+        await fs.writeFile(sourcePath, code, 'utf8');
+      }
 
-      const runRes = await runProcess('python', ['-u', 'main.py'], {
+      const runRes = await runProcess('python', ['-u', sourceFile], {
         cwd: workDir,
         stdin,
         timeoutMs,
@@ -363,9 +414,11 @@ export async function executeLocal(
     }
 
     if (language === 'javascript' || language === 'typescript') {
-      const filename = language === 'typescript' ? 'main.ts' : 'main.js';
+      const filename = project.sourceFile ?? (language === 'typescript' ? 'main.ts' : 'main.js');
       const sourcePath = path.join(workDir, filename);
-      await fs.writeFile(sourcePath, code, 'utf8');
+      if (!req.files || req.files.length === 0) {
+        await fs.writeFile(sourcePath, code, 'utf8');
+      }
 
       const runRes = await runProcess('node', [filename], {
         cwd: workDir,

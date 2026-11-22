@@ -28,6 +28,7 @@ import type {
   ThemeId,
   WebCodeBundle,
   WebTabId,
+  WorkspaceProject,
 } from './types/playground';
 import { decodeShareFromHash, encodeShareUrl } from './utils/shareUrl';
 import { executeSqlBrowser } from './utils/sqlEngine';
@@ -110,6 +111,18 @@ export default function App() {
     'codexforge.history.v1',
     [],
   );
+  const [workspaces, setWorkspaces] = useLocalStorage<WorkspaceProject[]>(
+    'codexforge.workspaces.v1',
+    [],
+  );
+  const [activeWorkspaceId, setActiveWorkspaceId] = useLocalStorage<string>(
+    'codexforge.activeWorkspace.v1',
+    '',
+  );
+  const [activeFilePath, setActiveFilePath] = useLocalStorage<string>(
+    'codexforge.activeFile.v1',
+    '',
+  );
 
   const [capabilities, setCapabilities] = useState<RuntimeCapability[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -135,6 +148,10 @@ export default function App() {
   const autoRunInitRef = useRef(true);
 
   const language = useMemo(() => getLanguageById(activeLanguageId), [activeLanguageId]);
+  const activeWorkspace = useMemo(
+    () => workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null,
+    [activeWorkspaceId, workspaces],
+  );
 
   const currentDraft = useMemo<LanguageDraft>(() => {
     const existing = drafts[activeLanguageId];
@@ -197,6 +214,23 @@ export default function App() {
   useEffect(() => {
     void fetchCapabilities();
   }, [fetchCapabilities]);
+
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    setActiveLanguageId(activeWorkspace.language);
+  }, [activeWorkspace?.id, activeWorkspace?.language, setActiveLanguageId]);
+
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    const timer = window.setTimeout(() => {
+      void fetch(`/api/workspaces/${encodeURIComponent(activeWorkspace.id)}/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: activeWorkspace.files }),
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeWorkspace]);
 
   // Web sandbox console postMessage bridge
   useEffect(() => {
@@ -274,8 +308,23 @@ export default function App() {
           code: nextCode,
         },
       }));
+      if (activeWorkspace && activeFilePath) {
+        setWorkspaces((prev) =>
+          prev.map((workspace) =>
+            workspace.id === activeWorkspace.id
+              ? {
+                  ...workspace,
+                  updatedAt: Date.now(),
+                  files: workspace.files.map((file) =>
+                    file.path === activeFilePath ? { ...file, content: nextCode } : file,
+                  ),
+                }
+              : workspace,
+          ),
+        );
+      }
     },
-    [activeLanguageId, currentDraft, setDrafts],
+    [activeFilePath, activeLanguageId, activeWorkspace, currentDraft, setDrafts, setWorkspaces],
   );
 
   const updateCurrentWebCode = useCallback(
@@ -432,6 +481,8 @@ export default function App() {
           flags: languageFlags[language.id] ?? language.defaultFlags ?? [],
           timeoutMs: settings.timeoutMs,
           remoteApiUrl: settings.remoteApiUrl || undefined,
+          entryFile: activeWorkspace?.entryFile,
+          files: activeWorkspace?.files,
         }),
       });
 
@@ -470,6 +521,7 @@ export default function App() {
       }
     }
   }, [
+    activeWorkspace,
     currentDraft.code,
     currentDraft.stdin,
     currentDraft.webCode,
@@ -660,6 +712,147 @@ export default function App() {
     notify(`Theme: ${next}`, 'info');
   }, [notify, settings.theme, updateSettings]);
 
+  const handleCreateWorkspace = useCallback(
+    (name: string) => {
+      const now = Date.now();
+      const id = `ws-${now}-${Math.random().toString(36).slice(2, 6)}`;
+      const fileName = language.filename || 'main.txt';
+      const workspace: WorkspaceProject = {
+        id,
+        name: name.trim() || `${language.name} Workspace`,
+        language: language.id,
+        entryFile: fileName,
+        files: [{ path: fileName, content: currentDraft.code }],
+        createdAt: now,
+        updatedAt: now,
+      };
+      setWorkspaces((prev) => [workspace, ...prev]);
+      setActiveWorkspaceId(id);
+      setActiveFilePath(fileName);
+      setOutputTab('terminal');
+      notify(`Created workspace "${workspace.name}"`, 'success');
+    },
+    [currentDraft.code, language, notify, setActiveFilePath, setActiveWorkspaceId, setOutputTab, setWorkspaces],
+  );
+
+  const handleSelectWorkspace = useCallback(
+    (workspace: WorkspaceProject) => {
+      setActiveWorkspaceId(workspace.id);
+      setActiveLanguageId(workspace.language);
+      const file = workspace.files.find((item) => item.path === workspace.entryFile) ?? workspace.files[0];
+      if (file) {
+        setActiveFilePath(file.path);
+        setDrafts((prev) => ({
+          ...prev,
+          [workspace.language]: {
+            code: file.content,
+            stdin: prev[workspace.language]?.stdin ?? '',
+          },
+        }));
+      }
+      setOutputTab('terminal');
+    },
+    [setActiveFilePath, setActiveLanguageId, setActiveWorkspaceId, setDrafts],
+  );
+
+  const handleSelectProjectFile = useCallback(
+    (path: string) => {
+      const file = activeWorkspace?.files.find((item) => item.path === path);
+      if (!file) return;
+      setActiveFilePath(path);
+      setDrafts((prev) => ({
+        ...prev,
+        [activeLanguageId]: {
+          ...currentDraft,
+          code: file.content,
+        },
+      }));
+    },
+    [activeLanguageId, activeWorkspace, currentDraft, setActiveFilePath, setDrafts],
+  );
+
+  const handleCreateProjectFile = useCallback(
+    (path: string) => {
+      if (!activeWorkspace) return;
+      const cleanPath = path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+      if (!cleanPath || cleanPath.split('/').includes('..')) {
+        notify('Invalid file path', 'error');
+        return;
+      }
+      if (activeWorkspace.files.some((file) => file.path === cleanPath)) {
+        handleSelectProjectFile(cleanPath);
+        return;
+      }
+      const nextWorkspace: WorkspaceProject = {
+        ...activeWorkspace,
+        updatedAt: Date.now(),
+        files: [...activeWorkspace.files, { path: cleanPath, content: '' }],
+      };
+      setWorkspaces((prev) =>
+        prev.map((workspace) => (workspace.id === activeWorkspace.id ? nextWorkspace : workspace)),
+      );
+      setActiveFilePath(cleanPath);
+      setDrafts((prev) => ({
+        ...prev,
+        [activeLanguageId]: { ...currentDraft, code: '' },
+      }));
+      notify(`Created ${cleanPath}`, 'success');
+    },
+    [activeLanguageId, activeWorkspace, currentDraft, handleSelectProjectFile, notify, setActiveFilePath, setDrafts, setWorkspaces],
+  );
+
+  const handleDeleteProjectFile = useCallback(
+    (path: string) => {
+      if (!activeWorkspace) return;
+      if (activeWorkspace.files.length === 1) {
+        notify('A workspace must keep at least one file', 'error');
+        return;
+      }
+      const files = activeWorkspace.files.filter((file) => file.path !== path);
+      const entryFile = activeWorkspace.entryFile === path ? files[0].path : activeWorkspace.entryFile;
+      setWorkspaces((prev) =>
+        prev.map((workspace) =>
+          workspace.id === activeWorkspace.id
+            ? { ...workspace, entryFile, files, updatedAt: Date.now() }
+            : workspace,
+        ),
+      );
+      if (activeFilePath === path) {
+        setActiveFilePath(files[0].path);
+        setDrafts((prev) => ({
+          ...prev,
+          [activeLanguageId]: { ...currentDraft, code: files[0].content },
+        }));
+      }
+    },
+    [activeFilePath, activeLanguageId, activeWorkspace, currentDraft, notify, setActiveFilePath, setDrafts, setWorkspaces],
+  );
+
+  const handleSetEntryFile = useCallback(
+    (path: string) => {
+      if (!activeWorkspace) return;
+      setWorkspaces((prev) =>
+        prev.map((workspace) =>
+          workspace.id === activeWorkspace.id ? { ...workspace, entryFile: path, updatedAt: Date.now() } : workspace,
+        ),
+      );
+      notify(`Entry file set to ${path}`, 'success');
+    },
+    [activeWorkspace, notify, setWorkspaces],
+  );
+
+  const handleDeleteWorkspace = useCallback(
+    (id: string) => {
+      setWorkspaces((prev) => prev.filter((workspace) => workspace.id !== id));
+      if (activeWorkspaceId === id) {
+        setActiveWorkspaceId('');
+        setActiveFilePath('');
+      }
+      notify('Workspace deleted', 'info');
+    },
+    [activeWorkspaceId, notify, setActiveFilePath, setActiveWorkspaceId, setWorkspaces],
+  );
+
   const isHorizontal = settings.layout === 'horizontal';
 
   return (
@@ -760,6 +953,16 @@ export default function App() {
           }
           onRestoreHistory={handleRestoreHistory}
           onClearHistory={() => setHistory([])}
+          workspaces={workspaces}
+          activeWorkspaceId={activeWorkspaceId}
+          activeFilePath={activeFilePath}
+          onCreateWorkspace={handleCreateWorkspace}
+          onSelectWorkspace={handleSelectWorkspace}
+          onSelectProjectFile={handleSelectProjectFile}
+          onCreateProjectFile={handleCreateProjectFile}
+          onDeleteProjectFile={handleDeleteProjectFile}
+          onSetEntryFile={handleSetEntryFile}
+          onDeleteWorkspace={handleDeleteWorkspace}
         />
 
         {/* Resizable Split Workbench */}
@@ -796,6 +999,7 @@ export default function App() {
                 onResetTemplate={handleResetTemplate}
                 onRunShortcut={() => void handleRun()}
                 onNotify={(m) => notify(m, 'success')}
+                activeFilename={activeFilePath || undefined}
               />
             </div>
           </div>
@@ -861,6 +1065,8 @@ export default function App() {
                 }}
                 onJumpToLine={(line, col) => editorRef.current?.jumpToLine(line, col)}
                 onNotify={(m) => notify(m, 'success')}
+                workspaceId={activeWorkspace?.id}
+                workspaceName={activeWorkspace?.name}
               />
             </div>
           </div>

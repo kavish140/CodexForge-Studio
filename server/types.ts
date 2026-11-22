@@ -16,6 +16,8 @@ export interface RunRequest {
   runId: string;
   language: string;
   code: string;
+  entryFile?: string;
+  files?: Array<{ path: string; content: string }>;
   stdin?: string;
   flags?: string[];
   timeoutMs?: number;

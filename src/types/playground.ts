@@ -50,9 +50,24 @@ export type LayoutMode = 'horizontal' | 'vertical';
 
 export type WebTabId = 'html' | 'css' | 'js';
 
-export type OutputTabId = 'console' | 'preview' | 'tables';
+export type OutputTabId = 'console' | 'preview' | 'tables' | 'terminal';
 
-export type SidebarTabId = 'templates' | 'saved' | 'history';
+export type SidebarTabId = 'templates' | 'saved' | 'history' | 'workspaces';
+
+export interface ProjectFile {
+  path: string;
+  content: string;
+}
+
+export interface WorkspaceProject {
+  id: string;
+  name: string;
+  language: LanguageId;
+  entryFile: string;
+  files: ProjectFile[];
+  createdAt: number;
+  updatedAt: number;
+}
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
 

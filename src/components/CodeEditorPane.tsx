@@ -50,6 +50,7 @@ interface CodeEditorPaneProps {
   onResetTemplate: () => void;
   onRunShortcut: () => void;
   onNotify: (msg: string) => void;
+  activeFilename?: string;
 }
 
 const WEB_TABS: { id: WebTabId; label: string; monacoLang: string; color: string }[] = [
@@ -75,6 +76,7 @@ export const CodeEditorPane = forwardRef<CodeEditorHandle, CodeEditorPaneProps>(
       onResetTemplate,
       onRunShortcut,
       onNotify,
+      activeFilename,
     },
     ref,
   ) {
@@ -96,9 +98,9 @@ export const CodeEditorPane = forwardRef<CodeEditorHandle, CodeEditorPaneProps>(
     const activeMonacoLang = isWeb
       ? WEB_TABS.find((t) => t.id === webTab)?.monacoLang ?? 'html'
       : language.monacoLanguage;
-    const activeFilename = isWeb
+    const displayFilename = activeFilename ?? (isWeb
       ? WEB_TABS.find((t) => t.id === webTab)?.label ?? 'index.html'
-      : language.filename;
+      : language.filename);
 
     useImperativeHandle(ref, () => ({
       jumpToLine(line: number, column = 1) {
@@ -217,7 +219,7 @@ export const CodeEditorPane = forwardRef<CodeEditorHandle, CodeEditorPaneProps>(
       try {
         await navigator.clipboard.writeText(activeValue);
         setCopied(true);
-        onNotify(`Copied ${activeFilename} to clipboard`);
+        onNotify(`Copied ${displayFilename} to clipboard`);
         setTimeout(() => setCopied(false), 1500);
       } catch {
         onNotify('Clipboard access denied');
@@ -232,10 +234,10 @@ export const CodeEditorPane = forwardRef<CodeEditorHandle, CodeEditorPaneProps>(
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = language.filename;
+      a.download = displayFilename.split('/').pop() ?? displayFilename;
       a.click();
       URL.revokeObjectURL(url);
-      onNotify(`Downloaded ${language.filename}`);
+      onNotify(`Downloaded ${displayFilename}`);
     };
 
     const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
@@ -295,7 +297,7 @@ export const CodeEditorPane = forwardRef<CodeEditorHandle, CodeEditorPaneProps>(
                 }}
               >
                 <FileCode className="h-3.5 w-3.5" style={{ color: language.accentHex }} />
-                <span>{language.filename}</span>
+                <span>{displayFilename}</span>
               </div>
             )}
           </div>
@@ -336,7 +338,7 @@ export const CodeEditorPane = forwardRef<CodeEditorHandle, CodeEditorPaneProps>(
               onClick={handleDownload}
               className="flex h-6.5 w-6.5 items-center justify-center rounded transition-colors hover:bg-[var(--bg-hover)]"
               style={{ color: 'var(--text-secondary)' }}
-              title={`Download ${language.filename}`}
+              title={`Download ${displayFilename}`}
               aria-label="Download source file"
             >
               <Download className="h-3.5 w-3.5" />
